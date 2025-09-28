@@ -45,6 +45,7 @@
         // Start webcam and face detection
         async function startWebcam() {
             try {
+                if (window.modelsReady) { await window.modelsReady; }
                 const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                 const video = document.createElement('video');
                 video.srcObject = stream;
@@ -228,6 +229,7 @@
         // Process images from choosed files and send descriptors to SERVER
         async function processAndSendDescriptors() {
             processingDiv.innerHTML = 'Loading models...';
+            if (window.modelsReady) { await window.modelsReady; }
             processingDiv.innerHTML = 'Models loaded. Processing images...';
 
             const securityCode = document.getElementById('security_code').value;
