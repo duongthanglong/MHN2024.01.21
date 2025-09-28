@@ -80,7 +80,11 @@
                 startButton.textContent = "Stop"
                 storedDescriptor = data.descriptor.map(d => new Float32Array(d));
                 FALSETHRESHOLD = data.falseThreshold || FALSETHRESHOLD; // Update threshold
-                window.open(meetUrl, '_blank');                
+                // window.open(meetUrl, '_blank');                
+                // await startCapture();
+                window.open(meetUrl, '_blank');
+                // ensure models are loaded before any detectTick runs:
+                if (window.modelsReady) { await window.modelsReady; }
                 await startCapture();
             } else {
                 storedDescriptor = null;
