@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Monitor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid black; padding: 8px; text-align: left; }
+        .highlight-miss { background-color: yellow; }
+        .highlight-stop { background-color: #800080; }
+        .highlight-over { background-color: #ff6666; animation: blink 1s infinite; }
+        .class-color-0 { background-color: #e6f3ff; }
+        .class-color-1 { background-color: #e6ffe6; }
+        .class-color-2 { background-color: #fff2e6; }
+        .class-color-3 { background-color: #ffe6f3; }
+        .class-color-4 { background-color: #f2e6ff; }
+        .class-color-5 { background-color: #e6f3e6; }
+        #thresholdForm { margin-bottom: 20px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div id="thresholdForm">
+        <label for="falseThreshold">False Threshold:</label>
+        <input type="number" id="falseThreshold" min="0">
+        <button type="button" id="updateThreshold">Update Threshold</button>
+    </div>
+    <table id="monitorTable">
+        <thead>
+            <tr>
+                <th>Class ID</th>
+                <th>User ID</th>
+                <th>Matched (%)</th>
+                <th>Negative (%)</th>
+                <th>Minutes</th>
+                <th>NoMatched (contiuously)</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <script>
+        const socket = io();
+        const tableBody = document.querySelector('#monitorTable tbody');
+        const falseThresholdInput = document.getElementById('falseThreshold');
+        const updateThresholdButton = document.getElementById('updateThreshold');
+        const metricsData = {};
+        let falseThreshold = {{ falsethreshold|tojson|safe }}; // Default, updated by server
+        falseThresholdInput.value = falseThreshold
+        const colorClasses = [
+            'class-color-0', 'class-color-1', 'class-color-2',
+            'class-color-3', 'class-color-4', 'class-color-5'
+        ];
+
+        socket.emit('join_monitor');
+
+        socket.on('all_metrics', (data) => {
+            falseThreshold = data.falseThreshold || 3;
+            falseThresholdInput.value = falseThreshold;
+            data.metrics.forEach(({ class_id, user_id, match_percentage, neg_percentage, total_minutes, continuous_false_count, status }) => {
+                if (!metricsData[class_id]) metricsData[class_id] = {};
+                metricsData[class_id][user_id] = { match_percentage, neg_percentage, total_minutes, continuous_false_count, status };
+            });
+            updateTable();
+        });
+
+        socket.on('update_metrics', (data) => {
+            const { class_id, user_id, match_percentage, neg_percentage, total_minutes, continuous_false_count, status } = data;
+            if (!metricsData[class_id]) metricsData[class_id] = {};
+            metricsData[class_id][user_id] = { match_percentage, neg_percentage, total_minutes, continuous_false_count, status };
+            updateTable();
+        });
+
+        socket.on('update_threshold', (data) => {
+            falseThreshold = data.falseThreshold || 3;
+            falseThresholdInput.value = falseThreshold;
+            console.log(`Updated falseThreshold to ${falseThreshold}`);
+            updateTable();
+        });
+
+        updateThresholdButton.addEventListener('click', () => {
+            const newThreshold = parseInt(falseThresholdInput.value);
+            if (!isNaN(newThreshold) && newThreshold >= 0) {
+                socket.emit('update_threshold', { falseThreshold: newThreshold });
+            } else {
+                alert('Please enter a valid non-negative number.');
+            }
+        });
+
+        function updateTable() {
+            tableBody.innerHTML = '';
+            const classIds = Object.keys(metricsData).sort();
+            const classColorMap = {};
+            classIds.forEach((class_id, index) => {
+                classColorMap[class_id] = colorClasses[index % colorClasses.length];
+            });
+
+            classIds.forEach(class_id => {
+                const userIds = Object.keys(metricsData[class_id]).sort();
+                userIds.forEach(user_id => {
+                    const { match_percentage, neg_percentage, total_minutes, continuous_false_count, status } = metricsData[class_id][user_id];
+                    const row = document.createElement('tr');
+                    row.className = classColorMap[class_id];
+                    row.innerHTML = `
+                        <td>${class_id}</td>
+                        <td>${user_id}</td>
+                        <td>${match_percentage}%</td>
+                        <td>${neg_percentage}%</td>
+                        <td>${total_minutes}</td>
+                        <td class="${continuous_false_count > falseThreshold ? 'highlight-miss' : ''}">${continuous_false_count}</td>
+                        <td class="${status==='over'?'highlight-over':(status==='stop'?'highlight-stop':'')}">${status}</td>
+                    `;
+                    tableBody.appendChild(row);
+                });
+            });
+        }
+    </script>
+</body>
+</html>

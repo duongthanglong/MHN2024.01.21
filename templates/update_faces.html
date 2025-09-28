@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Update Face Descriptors</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
+</head>
+<body>
+    <h1>Update Face Descriptors</h1>
+    <label for="security_code">Security Code:</label>
+    <input type="password" id="security_code" value="HOU@2025" required><br>
+    <label for="user_id">User ID (for Webcam Capturing):</label>
+    <input type="text" id="user_id" name="user_id" value="duongthanglong"><br>
+
+    <label for="face_files">Select Face Images (*.jpg, *.png):</label>
+    <input type="file" id="face_files" multiple accept=".jpg,.png" required><br><br>
+
+    <button onclick="processAndSendDescriptors()">Update Descriptors</button>
+
+    <button onclick="startWebcam()">Start Webcam Capture</button><br>
+    <canvas id="videoCanvas" width="640" height="480"></canvas>
+    <div id="processing"></div>
+    <div id="status"></div>
+    <canvas id="histogram"></canvas>
+    
+    <script src="/static/general.js"></script>
+    <script>
+        let S_DESCRIPTORS = {{ descriptors|tojson|safe }};
+        let S_DISTANCES = {{ distances|tojson|safe }};
+        let SAMETHRESHOLD = {{ samethreshold|tojson|safe }};
+        let newDescriptor = null;
+        let detectionInterval=200, intervalId = null, animationFrameId = null;
+
+        //\\//\\//\\//\\//\\//\\//\\ new webcam capture //\\//\\//\\//\\//\\//\\//\\
+        let stream = null;
+        let busy = false;
+        let lastDetection = { box: null, descriptors: null, fer: null };
+        const video = document.getElementById('video');
+        const videoCanvas = document.getElementById('videoCanvas');
+        const statusDiv = document.getElementById('status');
+        const processingDiv = document.getElementById('processing');
+        // Start webcam and face detection
+        async function startWebcam() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const video = document.createElement('video');
+                video.srcObject = stream;
+                video.play();
+
+                const ctx = videoCanvas.getContext('2d');
+
+                // Continuous webcam rendering
+                function renderVideo() {
+                    ctx.save();                    
+                    ctx.scale(-1, 1); // Flip the canvas horizontally | Mirror X-axis
+                    ctx.translate(-videoCanvas.width, 0); // Move origin to top-right                    
+                    ctx.clearRect(0, 0, videoCanvas.width, videoCanvas.height);
+                    ctx.drawImage(video, 0, 0, videoCanvas.width, videoCanvas.height);
+                    ctx.restore();
+
+                    if (lastDetection.box) {
+                        const { x, y, width, height } = lastDetection.box;
+                        ctx.strokeStyle = 'green';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(x, y, width, height);
+                        const label = `Descriptors-${lastDetection.fer}`; //%`;
+                        ctx.font = '14px Arial'; ctx.textBaseline = 'top'; ctx.lineWidth = 3; 
+                        ctx.fillStyle = 'red'; ctx.fillText(label, x+2, y+2);
+                    }
+                    animationFrameId = requestAnimationFrame(renderVideo);
+                }
+
+                // Face detection and recognition
+                async function detectTick() {
+                    if (busy) return;                              // NEW: no overlap when tab throttles
+                    busy = true;
+                    try {
+                        const result = await face_detect_descriptors(document.hidden?video:videoCanvas, true);
+
+                        if (result) {
+                            const { x, y, width, height } = result.box;
+                            lastDetection.box = { x, y, width, height };
+                            lastDetection.descriptors = result.descriptor;
+                            lastDetection.fer = result.fer;
+                        } else {
+                            lastDetection.box = null;
+                            lastDetection.descriptors = null;
+                            lastDetection.fer = null;
+                        }
+                    } catch (err) {
+                        console.log(err)
+                        lastDetection.box = null;
+                        lastDetection.descriptors = null;
+                        lastDetection.fer = null;
+                    } finally { 
+                        busy = false; 
+                    }
+                }//end of detectTick
+
+                // Keep interval with calling the function above
+                intervalId = setInterval(detectTick, detectionInterval);
+                // Start continuous rendering
+                renderVideo();
+            } catch (err) {
+                statusDiv.textContent = 'Error: ' + err.message;
+                if (intervalId){ clearInterval(intervalId); }
+                if (animationFrameId) { cancelAnimationFrame(animationFrameId); }
+            }
+        }
+        // Capture face and send descriptor on video click
+        videoCanvas.addEventListener('click', async (event) => {
+            const userId = document.getElementById('user_id').value.trim();
+            const securityCode = document.getElementById('security_code').value;
+            if (!userId) {
+                statusDiv.textContent = 'Please enter a User ID.';
+                return;
+            }
+            statusDiv.textContent = 'Processing face capture...';
+            if (lastDetection.box) {
+                const { x, y, width, height } = lastDetection.box;
+                const rect = videoCanvas.getBoundingClientRect();
+                const clickX = videoCanvas.width - (event.clientX - rect.left) * (videoCanvas.width / rect.width);
+                const clickY = (event.clientY - rect.top) * (videoCanvas.height / rect.height);
+
+                if (clickX >= x && clickX <= x + width && clickY >= y && clickY <= y + height) {
+                    const descriptorsToSend = { [userId]: [lastDetection.descriptors] };
+                    try {
+                        const response = await fetch('/update_descriptors', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ security_code: securityCode, descriptors: descriptorsToSend, atIndex:1 })
+                        });
+                        const result = await response.json();
+                        if (result.success) {
+                            statusDiv.textContent = `Face descriptor for ${userId} sent successfully!`;
+                        } else {
+                            statusDiv.textContent = 'No success on sending descriptor: ' + result.message;
+                        }
+                    } catch (error) {
+                        statusDiv.textContent = 'Exception on sending descriptor: ' + error.message;
+                    }
+                } else {
+                    statusDiv.textContent = 'Click was outside the detected face. No sending to server!';
+                }
+            } else {
+                statusDiv.textContent = 'No face detected in capture.';
+            }
+        });
+        //\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\//\\
+
+        // Function to update chart and stats
+        function updateChartAndStats(mm_distances) {
+            if (!mm_distances || Object.keys(mm_distances).length===0) return;
+            distances = mm_distances.pairs;
+            same_max = get_max(mm_distances.same);
+            // Calculate mean and min
+            const mean = get_sum(distances)/distances.length;
+            const min = get_min(distances);
+            const max = get_max(distances);
+            let c_threshold = 0;
+            for (let i=0;i<distances.length;i++){
+                c_threshold += (distances[i]<SAMETHRESHOLD?1:0);
+            }
+
+            // Update stats display
+            statusDiv.innerHTML = `
+                <br>Filtering users: ${(mm_distances.filter)} 
+                <br>Pairs| Mean Distances: ${(mean).toFixed(3)} 
+                <br>Pairs| Minimum Distances: ${(min).toFixed(3)}
+                <br>Pairs| Maximum Distances: ${(max).toFixed(3)}
+                <br>Total Persons/Pairs: ${mm_distances.same.length.toLocaleString('en-US')} / ${distances.length.toLocaleString('en-US')}
+                <br>Same| Maximum Distances: ${(same_max).toFixed(3)}
+                <br>Same| Threshold: ${(SAMETHRESHOLD).toFixed(3)} (${((1-c_threshold/distances.length)*100).toFixed(2)}%)
+            `;
+
+            // Create histogram
+            const ctx = document.getElementById('histogram').getContext('2d');
+            // Destroy existing chart if any
+            if (window.histogramChart) {
+                window.histogramChart.destroy();
+            }
+
+            // Check if Chart.js is loaded
+            if (typeof Chart === 'undefined') {
+                statusDiv.innerHTML += '<br>Chart.js failed to load. Please check the CDN or network connection.';
+                return;
+            }
+
+            // Prepare histogram data
+            const numBins = 100; 
+            max_dist = get_max(distances);
+            const binSize = max_dist/numBins;
+            const bins = Array(Math.ceil(max_dist / binSize)).fill(0);
+            distances.forEach(d => {
+                const binIndex = Math.floor(d / binSize);
+                if (binIndex < bins.length) {
+                    bins[binIndex]++;
+                }
+            });
+
+            window.histogramChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: bins.map((_, i) => (i * binSize).toFixed(2)),
+                    datasets: [{
+                        label: 'Frequency',
+                        data: bins,
+                        backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    scales: {
+                        x: { title: { display: true, text: 'Distances' } },
+                        y: { title: { display: true, text: 'Frequency' } }
+                    },
+                    plugins: {
+                        title: { display: true, text: 'Histogram of Minimum Pairwise User Distances' }
+                    }
+                }
+            });
+        }
+
+        // Process images from choosed files and send descriptors to SERVER
+        async function processAndSendDescriptors() {
+            processingDiv.innerHTML = 'Loading models...';
+            processingDiv.innerHTML = 'Models loaded. Processing images...';
+
+            const securityCode = document.getElementById('security_code').value;
+            if (!securityCode) {
+                processingDiv.innerHTML = 'Please enter the security code.';
+                return;
+            }
+
+            const files = document.getElementById('face_files').files;
+            if (files.length === 0) {
+                processingDiv.innerHTML = 'Please select image files.';
+                return;
+            }
+
+            let descriptors = {};
+            let processedCount = 0;
+            const recentFiles = [];
+            for (let file of files) {
+                // Assume user_id is the file name without extension
+                const userId = file.name.split('.')[0];
+                // console.log(userId)
+
+                // Detect faces and extract descriptors
+                const img = await faceapi.bufferToImage(file);                
+                const result = await face_detect_descriptors(img, false);
+
+                // console.log(detection)
+                if (result) {
+                    const descriptor = result.descriptor;
+                    // console.log(descriptor)
+
+                    if (!descriptors[userId]) { descriptors[userId] = []; }
+                    descriptors[userId].push(descriptor);
+                    processingDiv.innerHTML += `<br>Processed ${file.name} for user ${userId}`;
+                    recentFiles.push(`Processed ${file.name} for user ${userId}`);
+                } else {
+                    processingDiv.innerHTML += `<br>No face detected in ${file.name}`;
+                    recentFiles.push(`No face detected in ${file.name}`);
+                }
+                if (recentFiles.length > 10) recentFiles.shift(); // Keep only last 10
+                processedCount++;
+                processingDiv.innerHTML = `Processed ${processedCount} files<br>Recent files:<br>${recentFiles.join('<br>')}`;
+            }            
+
+            if (Object.keys(descriptors).length <= 1) {
+                processingDiv.innerHTML += '<br><b>No or only one descriptors extracted. No changing histogram chart.</b>';
+            }else {                
+                S_DESCRIPTORS = descriptors;
+                const mm_distances = computePairwiseDistances(S_DESCRIPTORS);
+                updateChartAndStats(mm_distances);
+            }
+
+            if (Object.keys(descriptors).length === 0) return;
+            processingDiv.innerHTML += '<br>Sending to server...';
+            const response = await fetch('/update_descriptors', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ security_code: securityCode, descriptors: descriptors })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                processingDiv.innerHTML += '<br>Update successful!';
+            } else {
+                processingDiv.innerHTML += `<br>Error: ${result.message}`;
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            if (S_DISTANCES) {
+                updateChartAndStats(S_DISTANCES);
+            }else{
+                console.log('No distances or length=0',S_DISTANCES)
+            }
+        });
+    </script>
+</body>
+</html>
