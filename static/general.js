@@ -109,6 +109,8 @@ window.modelsReady = loadModels();
 // })();                           
 async function face_detect_descriptors(img_video, withFER) {
     if (!MODELS_READY) { await loadModels(); }
+    console.log('houface input:', houface_featuring.inputs[0].shape);
+    console.log('houfer input:',  houfer_recognizing.inputs[0].shape);
     const detection = await faceapi.detectSingleFace(img_video);
     if (detection) {
         const faceCanvas = cropSquareToCanvas(img_video, detection.box);
