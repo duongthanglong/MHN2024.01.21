@@ -1,13 +1,14 @@
 # Updated app.py
+import os
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
 import json, numpy as np, time
 from itertools import combinations
 import threading
 
-app = Flask(__name__)
-app.config['SECRET_KEY'] = 'HOU@2025'
-socketio = SocketIO(app)
+app = Flask(__name__, template_folder="templates", static_folder="static")
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'HOU@2025')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 '''================================================='''
 # Load descriptors
@@ -64,7 +65,8 @@ def get_usermetrics(class_id, user_id):
         true_pct = round((true_count / total_count * 100) if total_count else 0,2)
         neg_pct = round((neg_count / total_count * 100) if total_count else 0,2)
         fullhist = user_data.get('full_history')
-        total_minutes = round((fullhist[-1]['timestamp']-fullhist[0]['timestamp'])/60,2)
+        if len(fullhist)>0: total_minutes = round((fullhist[-1]['timestamp']-fullhist[0]['timestamp'])/60,2)
+        else: total_minutes = 0
         continuous_false = user_data.get('continuous_false_count', 0)
         status = user_data.get('status', 'none')
         return { 'class_id': class_id, 'user_id': user_id, 'match_percentage': true_pct, 'neg_percentage': neg_pct, 
@@ -73,7 +75,7 @@ def get_usermetrics(class_id, user_id):
     else: return None
 '''================================================='''
 '''================================================='''
-DESCRIPTOR_FILE = 'descriptors.json'
+DESCRIPTOR_FILE = os.environ.get("DESCRIPTOR_FILE", "descriptors.json")
 CLASSROOMS = {'0':['duongthanglong','22A1001D0001','22A1001D0345']}
 HISTORIES = {}  # {class_id: {user_id: {true_count, neg_count, total_count, continuous_false_count, status, full_history}}}
 DESCRIPTORS = load_descriptors(DESCRIPTOR_FILE)
@@ -101,6 +103,10 @@ def check_inactive_users():
 socketio.start_background_task(check_inactive_users)
 # threading.Thread(target=check_inactive_users, daemon=True).start()
 '''================================================='''
+@app.route('/health')
+def health():
+    return "ok", 200
+
 @app.route('/')
 def index():
     return render_template('index.html', samethreshold=SAMETHRESHOLD, falsethreshold=FALSETHRESHOLD)
@@ -115,6 +121,7 @@ def update_faces():
     if sfilter:
         sfilter = sfilter.split(',')
         print('Filtering=', sfilter, flush=True)
+        global DISTANCES
         DISTANCES = compute_pairwise_distances(DESCRIPTORS,sfilter)
         return render_template('update_faces.html', descriptors={}, distances=DISTANCES, samethreshold=SAMETHRESHOLD)
     else:
@@ -122,7 +129,7 @@ def update_faces():
 
 @app.route('/update_descriptors', methods=['POST'])
 def update_descriptors():
-    data = request.json
+    data = request.json or {} #data = request.json
     security_code = data.get('security_code')
     if security_code != app.config['SECRET_KEY']:
         return jsonify({'success': False, 'message': 'Invalid security code'}), 403
@@ -242,4 +249,6 @@ def handle_join_monitor():
     emit('all_metrics', {'metrics': metrics, 'falseThreshold': FALSETHRESHOLD})
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    socketio.run(app, host='0.0.0.0', port=port)
+    #socketio.run(app, debug=True)
