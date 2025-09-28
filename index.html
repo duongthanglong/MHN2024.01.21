@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>User Face Recognition</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; }
+        canvas { border: 1px solid black; }
+        #result { margin-top: 10px; font-size: 20px; }
+        #userForm { margin-bottom: 20px; }
+        #error { color: red; }
+        #warning { color: red; font-weight: bold; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <form id="userForm">
+        <label for="class_id">Class ID:</label>
+        <input type="text" id="class_id" value="0" required>
+        <label for="user_id">User ID:</label>
+        <input type="text" id="user_id" value="duongthanglong" required>
+        <button type="button" id="startButton">Start</button>
+    </form>
+    <div id="error"></div>
+    <canvas id="videoCanvas" width="640" height="480"></canvas>
+    <div id="result"></div>
+    <div id="warning"></div>
+
+    <script src="/static/general.js"></script> 
+    <script>
+        const socket = io();
+        const classIdInput = document.getElementById('class_id');
+        const userIdInput = document.getElementById('user_id');
+        const startButton = document.getElementById('startButton');
+        const videoCanvas = document.getElementById('videoCanvas');
+        const resultDiv = document.getElementById('result');
+        const errorDiv = document.getElementById('error');
+        const warningDiv = document.getElementById('warning');
+        let intervalId = null, animationFrameId = null;
+        let busy = false;
+        let storedDescriptor = null;
+        let continuousFalseCount = 0;
+        let FALSETHRESHOLD = {{ falsethreshold|tojson|safe }}; // Default, updated by server
+        let SAMETHRESHOLD = {{ samethreshold|tojson|safe }}; // Calibrate if needed
+        const meetUrl = 'https://meet.google.com/rqv-cvbr-cxg'; // Replace with actual Meet ID
+        const detectionInterval = 200; // 200ms (5 FPS) for face detection
+
+        // Make some events and processing
+        startButton.addEventListener('click', () => {
+            if (startButton.textContent==='Start'){
+                continuousFalseCount = 0;
+                const classId = classIdInput.value.trim();
+                const userId = userIdInput.value.trim();
+                if (!classId || !userId) {
+                    errorDiv.textContent = 'Please enter both Class ID and User ID.';
+                    return;
+                }
+                errorDiv.textContent = '';
+                socket.emit('check_user_id', { class_id: classId, user_id: userId });
+            }else{
+                alarmSet(false);
+                clearInterval(intervalId);
+                cancelAnimationFrame(animationFrameId);                
+                socket.emit('user_stop', {
+                    class_id: classIdInput.value,
+                    user_id: userIdInput.value,
+                });
+                classIdInput.disabled = false;
+                userIdInput.disabled = false;
+                startButton.textContent = 'Start'
+            }
+        });
+
+        socket.on('user_exists', async (data) => {
+            if (data.exists) {
+                classIdInput.disabled = true;
+                userIdInput.disabled = true;
+                startButton.textContent = "Stop"
+                storedDescriptor = data.descriptor.map(d => new Float32Array(d));
+                FALSETHRESHOLD = data.falseThreshold || FALSETHRESHOLD; // Update threshold
+                window.open(meetUrl, '_blank');                
+                await startCapture();
+            } else {
+                storedDescriptor = null;
+                errorDiv.textContent = 'Class ID or User ID does not exist or User ID does not in Class ID.';
+                clearInterval(intervalId);
+                cancelAnimationFrame(animationFrameId);
+            }
+        });
+
+        socket.on('update_threshold', (data) => {
+            FALSETHRESHOLD = data.falseThreshold || FALSETHRESHOLD;
+        });
+
+        async function startCapture() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const video = document.createElement('video');
+                video.srcObject = stream;
+                video.play();
+
+                const ctx = videoCanvas.getContext('2d');
+                let lastDetection = { box: null, distance: null, match: null, fer: null };
+
+                // Continuous webcam rendering
+                function renderVideo() {
+                    ctx.save();                    
+                    ctx.scale(-1, 1); // Flip the canvas horizontally | Mirror X-axis
+                    ctx.translate(-videoCanvas.width, 0); // Move origin to top-right                    
+                    ctx.clearRect(0, 0, videoCanvas.width, videoCanvas.height);
+                    ctx.drawImage(video, 0, 0, videoCanvas.width, videoCanvas.height);
+                    ctx.restore();
+
+                    if (lastDetection.box) {
+                        const { x, y, width, height } = lastDetection.box;
+                        ctx.strokeStyle = 'green';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(x, y, width, height);
+                        const label = `${(lastDetection.distance).toFixed(3)}-${lastDetection.fer}`; //%`;
+                        ctx.font = '14px Arial'; ctx.textBaseline = 'top'; ctx.lineWidth = 3; 
+                        ctx.fillStyle = 'red'; ctx.fillText(label, x+2, y+2);
+                    }
+                    resultDiv.textContent = lastDetection.match !== null ? `${(lastDetection.match ? 'True(<' : 'False(>=')}${SAMETHRESHOLD})` : 'No face detected';
+                    resultDiv.style.color = lastDetection.match !== null ? (lastDetection.match ? 'green' : 'red') : 'orange';
+                    warningDiv.textContent = continuousFalseCount > FALSETHRESHOLD ? `Warning: ${continuousFalseCount} consecutive failed matches! No detected faces or wrong user.` : '';
+                    if (lastDetection.match){
+                        alarmSet(false);
+                    }else{
+                        if (continuousFalseCount > FALSETHRESHOLD){ alarmSet(true); }
+                    }
+                    animationFrameId = requestAnimationFrame(renderVideo);
+                }
+
+                // Face detection and recognition
+                async function detectTick() {
+                    if (busy) return;                              // NEW: no overlap when tab throttles
+                    busy = true;
+                    try {
+                        const result = await face_detect_descriptors(document.hidden?video:videoCanvas, true); //video or videoCanvas
+
+                        if (result) {
+                            const { x, y, width, height } = result.box;
+                            lastDetection.box = { x, y, width, height };
+                            const newDescriptor = result.descriptor;
+                            const distances = storedDescriptor.map(stored => computeDistance(newDescriptor, stored));
+                            const distance = Math.min(...distances);
+                            lastDetection.distance = distance;
+                            lastDetection.match = distance < SAMETHRESHOLD;
+                            lastDetection.fer = result.fer;
+                        } else {
+                            lastDetection.box = null;
+                            lastDetection.distance = null;
+                            lastDetection.match = null;
+                            lastDetection.fer = null;
+                        }
+
+                        continuousFalseCount = lastDetection.match ? 0 : continuousFalseCount + 1;
+                        socket.emit('send_match', {
+                            class_id: classIdInput.value,
+                            user_id: userIdInput.value,
+                            match: lastDetection.match,
+                            fer: lastDetection.fer
+                        });
+                    } catch (err) {
+                        console.log(err)
+                        lastDetection.box = null;
+                        lastDetection.match = false;
+                        continuousFalseCount++;
+                        socket.emit('send_match', {
+                            class_id: classIdInput.value,
+                            user_id: userIdInput.value,
+                            match: false,
+                            fer: null
+                        });
+                    } finally { 
+                        busy = false; 
+                    }
+                }//end of detectTick
+
+                // Keep interval with calling the function above
+                intervalId = setInterval(detectTick, detectionInterval);
+                // Start continuous rendering
+                renderVideo();
+
+            } catch (err) {
+                errorDiv.textContent = 'Error: ' + err.message;
+                if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                    errorDiv.textContent += ' (Webcam may be in use by others)';
+                } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+                    errorDiv.textContent += ' (No webcam found.)';
+                }
+                clearInterval(intervalId);
+                cancelAnimationFrame(animationFrameId);
+            }
+        }
+    </script>
+</body>
+</html>
