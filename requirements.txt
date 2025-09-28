@@ -1,1 +1,8 @@
-Flask==3.0.0 gunicorn==23.0.0 python-dotenv==1.0.1 jax==0.4.36 jaxlib==0.4.36[cpu] numpy==1.26.1 flask-cors==5.0.1 flask-socketio==5.5.1
+Flask==3.0.0
+gunicorn==23.0.0
+python-dotenv==1.0.1
+jax==0.4.36
+jaxlib==0.4.36[cpu]
+numpy==1.26.1
+flask-cors==5.0.1
+flask-socketio==5.5.1
