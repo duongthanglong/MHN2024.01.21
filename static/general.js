@@ -87,16 +87,28 @@ function prewhiten(t) {
 let houface_featuring;
 let houfer_recognizing;
 const houfer_labels = {0:'Neg',1:'Neu',2:'Pos'};
-(async () => {
-    try {
-        await Promise.all([ faceapi.nets.ssdMobilenetv1.loadFromUri('/static/models/houdetection') ]);
-        houface_featuring = await tf.loadGraphModel('/static/models/houface512d/model.json');
-        houer_recognizing = await tf.loadGraphModel('/static/models/houfer/model.json');
-    } catch (error) {
-        alert('Error loading models: ' + error.message);
-    }
-})();                           
+let MODELS_READY = false;
+async function loadModels() {
+    if (MODELS_READY) return;
+    // (optional) tie TF.js instance to face-api if needed:
+    // if (faceapi.tf && faceapi.tf !== tf) faceapi.tf = tf;
+    await faceapi.nets.ssdMobilenetv1.loadFromUri('/static/models/houdetection');
+    houface_featuring   = await tf.loadGraphModel('/static/models/houface512d/model.json');
+    houfer_recognizing  = await tf.loadGraphModel('/static/models/houfer/model.json');
+    MODELS_READY = true;
+}
+window.modelsReady = loadModels();
+// (async () => {
+//     try {
+//         await Promise.all([ faceapi.nets.ssdMobilenetv1.loadFromUri('/static/models/houdetection') ]);
+//         houface_featuring = await tf.loadGraphModel('/static/models/houface512d/model.json');
+//         houer_recognizing = await tf.loadGraphModel('/static/models/houfer/model.json');
+//     } catch (error) {
+//         alert('Error loading models: ' + error.message);
+//     }
+// })();                           
 async function face_detect_descriptors(img_video, withFER) {
+    if (!MODELS_READY) { await loadModels(); }
     const detection = await faceapi.detectSingleFace(img_video);
     if (detection) {
         const faceCanvas = cropSquareToCanvas(img_video, detection.box);
@@ -111,7 +123,7 @@ async function face_detect_descriptors(img_video, withFER) {
                 let x2 = tf.image.resizeBilinear(x, [70, 70]); // adjust to expects 70
                 x2 = x2.div(127.5).sub(1.0);
                 x2 = prewhiten(x2).expandDims(0);            // [1,70,70,3]
-                p2 = houer_recognizing.predict(x2);
+                p2 = houfer_recognizing.predict(x2);
             }
             return {face:p1, fer:p2};
         });
