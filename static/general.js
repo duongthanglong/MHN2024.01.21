@@ -95,6 +95,7 @@ async function loadModels() {
     await faceapi.nets.ssdMobilenetv1.loadFromUri('/static/models/houdetection');
     houface_featuring   = await tf.loadGraphModel('/static/models/houface512d/model.json');
     houfer_recognizing  = await tf.loadGraphModel('/static/models/houfer/model.json');
+    console.log('Loaded models:',faceapi,houface_featuring,houfer_recognizing)
     MODELS_READY = true;
 }
 window.modelsReady = loadModels();
