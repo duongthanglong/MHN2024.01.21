@@ -84,8 +84,8 @@ function prewhiten(t) {
     return t.sub(mean).div(std.add(1e-6));
 }
 //*******************************************************************************//
-let houface_featuring;
-let houfer_recognizing;
+let houface_featuring = null;
+let houfer_recognizing = null;
 const houfer_labels = {0:'Neg',1:'Neu',2:'Pos'};
 let MODELS_READY = false;
 async function loadModels() {
@@ -94,13 +94,21 @@ async function loadModels() {
     // if (faceapi.tf && faceapi.tf !== tf) faceapi.tf = tf;
     try{
         houface_featuring   = await tf.loadGraphModel('./static/models/houface512d/model.json');
-        console.log('Loaded model:',houface_featuring);
-        houfer_recognizing  = await tf.loadGraphModel('./static/models/houfer/model.json');
-        console.log('Loaded model:',houfer_recognizing);
-        await faceapi.nets.ssdMobilenetv1.loadFromUri('./static/models/houdetection');
-        console.log('Loaded model:',faceapi);
+        console.log('Loaded model/houface_featuring:',houface_featuring);
     } catch (e) {
-        console.error('Error loading models:',e);
+        console.error('Error loading model/houface_featuring:',e);
+    }
+    try{
+        houfer_recognizing  = await tf.loadGraphModel('./static/models/houfer/model.json');
+        console.log('Loaded model/houfer_recognizing:',houfer_recognizing);
+    } catch (e) {
+        console.error('Error loading model/houfer_recognizing:',e);
+    }
+    try{
+        await faceapi.nets.ssdMobilenetv1.loadFromUri('./static/models/houdetection');
+        console.log('Loaded model/ssdMobilenetv1:',faceapi);
+    } catch (e) {
+        console.error('Error loading model/ssdMobilenetv1:',e);
     }
     MODELS_READY = true;
 }
