@@ -92,10 +92,14 @@ async function loadModels() {
     if (MODELS_READY) return;
     // (optional) tie TF.js instance to face-api if needed:
     // if (faceapi.tf && faceapi.tf !== tf) faceapi.tf = tf;
-    await faceapi.nets.ssdMobilenetv1.loadFromUri('/static/models/houdetection');
-    houface_featuring   = await tf.loadGraphModel('/static/models/houface512d/model.json');
-    houfer_recognizing  = await tf.loadGraphModel('/static/models/houfer/model.json');
-    console.log('Loaded models:',faceapi,houface_featuring,houfer_recognizing)
+    try{
+        await faceapi.nets.ssdMobilenetv1.loadFromUri('/static/models/houdetection');
+        houface_featuring   = await tf.loadGraphModel('/static/models/houface512d/model.json');
+        houfer_recognizing  = await tf.loadGraphModel('/static/models/houfer/model.json');
+        console.log('Loaded models:',faceapi,houface_featuring,houfer_recognizing);
+    } catch (e) {
+        console.error('Error loading models:',e);
+    }
     MODELS_READY = true;
 }
 window.modelsReady = loadModels();
