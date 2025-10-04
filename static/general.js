@@ -113,8 +113,9 @@ async function loadModels() {
     MODELS_READY = true;
 }
 window.modelsReady = loadModels();
-async function verifyModel() {
-    const modelJson = await fetch('./static/models/houface512d/model.json');
+async function verifyModel(path2model) {
+    console.log(`verify model at ${path2model}`)
+    const modelJson = await fetch(`${path2model}/model.json`);
     const modelData = await modelJson.json();
     
     console.log('Model topology:', modelData);
@@ -123,7 +124,7 @@ async function verifyModel() {
     if (modelData.weightsManifest) {
         for (const manifest of modelData.weightsManifest) {
             for (const path of manifest.paths) {
-                const weightUrl = `./static/models/houface512d/${path}`;
+                const weightUrl = `${path2model}/${path}`;
                 const response = await fetch(weightUrl);
                 const blob = await response.blob();
                 console.log(`${path}: ${blob.size} bytes, type: ${blob.type}`);
@@ -136,7 +137,9 @@ async function verifyModel() {
         }
     }
 }
-verifyModel();
+verifyModel('./static/models/houface512d');
+verifyModel('./static/models/houfer');
+verifyModel('./static/models/houdetection');
 
 // (async () => {
 //     try {
