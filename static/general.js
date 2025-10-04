@@ -202,7 +202,7 @@ async function face_detect_descriptors(img_video, withFER) {
             lab = houfer_labels[idx];
         }
         // face.dispose();
-        return {box:detection.box, descriptor:Array.from(l2Normalize(vec)), fer:lab};
+        return {box:box, descriptor:Array.from(l2Normalize(vec)), fer:lab};
     }else {
         return null;
     }
