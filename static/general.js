@@ -106,8 +106,23 @@ async function loadModels() {
         console.error('Error loading model/houfer_recognizing:',e);
     }
     try{
-        await faceapi.nets.ssdMobilenetv1.loadFromUri('./static/models/houdetection');
-        console.log('Loaded model/ssdMobilenetv1:',faceapi);
+        // await faceapi.nets.ssdMobilenetv1.loadFromUri('./static/models/houdetection');
+        // console.log('Loaded model/ssdMobilenetv1:',faceapi);
+        function loadScript(url, callback) {
+          const script = document.createElement('script');
+          script.src = url;
+          script.onload = callback;
+          script.onerror = () => console.error(`Failed to load script: ${url}`);
+          document.head.appendChild(script);
+        }
+        // Load the face-detection library
+        loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/face-detection', async () => {
+          console.log('Face detection library loaded');
+          const houface_detection = await faceDetection.createDetector(faceDetection.SupportedModels.MediaPipeFaceDetector, {
+            runtime: 'tfjs',
+          });
+          console.log('Model loaded:', houface_detection);
+        });        
     } catch (e) {
         console.error('Error loading model/ssdMobilenetv1:',e);
     }
