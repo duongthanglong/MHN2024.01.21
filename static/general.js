@@ -106,9 +106,8 @@ async function loadModels() {
         console.error('Error loading model/houfer_recognizing:',e);
     }
     try{
-        // await faceapi.nets.ssdMobilenetv1.loadFromUri('./static/models/houdetection');
-        houface_detection  = await tf.loadGraphModel('./static/models/houdetection/model.json');
-        console.log('Loaded model/ssdMobilenetv1:',houface_detection);
+        await faceapi.nets.ssdMobilenetv1.loadFromUri('./static/models/houdetection');
+        console.log('Loaded model/ssdMobilenetv1:',faceapi);
     } catch (e) {
         console.error('Error loading model/ssdMobilenetv1:',e);
     }
@@ -153,75 +152,10 @@ verifyModel('./static/models/houdetection');
 //         alert('Error loading models: ' + error.message);
 //     }
 // })();
-function toInputTensor(domImageOrVideo) {
-  // SSD-Mobilenet expects 300x300 RGB float32, [0..1], with batch dim
-  return tf.tidy(() => {
-    const t = tf.browser.fromPixels(domImageOrVideo);
-    const resized = tf.image.resizeBilinear(t, [300, 300], true);
-    const normalized = resized.toFloat().div(255.0);
-    return normalized.expandDims(0); // [1,300,300,3]
-  });
-}
-async function detectOne(domImageOrVideo, {
-  scoreThresh = 0.5,
-  iouThresh = 0.5,
-  force = false,        // if true, return top box even if below scoreThresh
-} = {}) {
-  const inputs = toInputTensor(domImageOrVideo);
-  const outputs = await model.executeAsync(inputs);
 
-  let boxesT, scoresT, classesT, numDetT;
-  if (Array.isArray(outs)) {
-    [boxesT, scoresT, classesT, numDetT] = outputs; // typical order
-  } else {
-    boxesT     = outputs['detection_boxes'];
-    scoresT    = outputs['detection_scores'];
-    classesT   = outputs['detection_classes'];
-    numDetT    = outputs['num_detections'];
-  }
-  // Move to JS for easy handling
-  const [boxesArr, scoresArr] = await Promise.all([boxesT.array(), scoresT.array()]);
-  const boxes2d   = boxesArr[0];   // [N,4] in [ymin,xmin,ymax,xmax], normalized
-  const scores1d  = scoresArr[0];  // [N]
-  // NMS but request ONLY 1 detection
-  const nmsIdxT = await tf.image.nonMaxSuppressionAsync(
-    tf.tensor2d(boxes2d),
-    tf.tensor1d(scores1d),
-    1,              // <= key line: single detection
-    iouThresh,
-    scoreThresh
-  );
-  let keep = await nmsIdxT.array();
-  // Optional fallback: pick the highest score even if below threshold
-  if (keep.length === 0 && force && scores1d.length > 0) {
-    let bestIdx = 0, bestScore = scores1d[0];
-    for (let i = 1; i < scores1d.length; i++) {
-      if (scores1d[i] > bestScore) { bestScore = scores1d[i]; bestIdx = i; }
-    }
-    keep = [bestIdx];
-  }
-  // Clean up tensors ASAP
-  tf.dispose([input, boxesT, scoresT, classesT, numDetT, nmsIdxT]);
-  if (keep.length === 0) return null;
-  // Convert the single kept box to pixel coords
-  const i = keep[0];
-  const w = domImageOrVideo.videoWidth || domImageOrVideo.width;
-  const h = domImageOrVideo.videoHeight || domImageOrVideo.height;
-  const [ymin, xmin, ymax, xmax] = boxes2d[i];
-  return {
-    score: scores1d[i],
-    box: {
-      x: Math.round(xmin * w),
-      y: Math.round(ymin * h),
-      width:  Math.round((xmax - xmin) * w),
-      height: Math.round((ymax - ymin) * h),
-    }
-  };
-}
 async function face_detect_descriptors(img_video, withFER) {
     if (!MODELS_READY) { await loadModels(); }
-    // const detection = await faceapi.detectSingleFace(img_video);
-    const detection = await detectOne(img_video);
+    const detection = await faceapi.detectSingleFace(img_video);
     if (detection) {
         const faceCanvas = cropSquareToCanvas(img_video, detection.box);
         let p1 = null; 
