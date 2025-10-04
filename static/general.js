@@ -118,7 +118,7 @@ async function loadModels() {
         // Load the face-detection library
         loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/face-detection', async () => {
           console.log('Face detection library loaded');
-          const houface_detection = await faceDetection.createDetector(faceDetection.SupportedModels.MediaPipeFaceDetector, {
+          houface_detection = await faceDetection.createDetector(faceDetection.SupportedModels.MediaPipeFaceDetector, {
             runtime: 'tfjs',
           });
           console.log('Loaded model/tfjs/face-detection:', houface_detection);
