@@ -172,6 +172,7 @@ async function face_detect_descriptors(img_video, withFER) {
     if (!MODELS_READY) { await loadModels(); }
     // const detection = await faceapi.detectSingleFace(img_video);
     const detections = await houface_detection.estimateFaces(img_video);
+    console.log('Detected:',detections);
     if (detections.length>0) {
         const detection = detections[0];
         const faceCanvas = cropSquareToCanvas(img_video, detection.box);
