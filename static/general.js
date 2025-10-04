@@ -121,7 +121,7 @@ async function loadModels() {
           const houface_detection = await faceDetection.createDetector(faceDetection.SupportedModels.MediaPipeFaceDetector, {
             runtime: 'tfjs',
           });
-          console.log('Model loaded:', houface_detection);
+          console.log('Loaded model/tfjs/face-detection:', houface_detection);
         });        
     } catch (e) {
         console.error('Error loading model/ssdMobilenetv1:',e);
@@ -170,8 +170,10 @@ verifyModel('./static/models/houdetection','ssd_mobilenetv1_model-weights_manife
 
 async function face_detect_descriptors(img_video, withFER) {
     if (!MODELS_READY) { await loadModels(); }
-    const detection = await faceapi.detectSingleFace(img_video);
-    if (detection) {
+    // const detection = await faceapi.detectSingleFace(img_video);
+    const detections = await houface_detection.estimateFaces(img_video);
+    if (detections.length>0) {
+        const detection = detections[0];
         const faceCanvas = cropSquareToCanvas(img_video, detection.box);
         let p1 = null; 
         let p2 = null;
