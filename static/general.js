@@ -115,9 +115,9 @@ async function loadModels() {
 }
 window.modelsReady = loadModels();
 
-async function verifyModel(path2model) {
+async function verifyModel(path2model, name2json='model.json') {
     console.log(`verify model at ${path2model}`)
-    const modelJson = await fetch(`${path2model}/model.json`);
+    const modelJson = await fetch(`${path2model}/${name2json}`);
     const modelData = await modelJson.json();
     
     console.log('Model topology:', modelData);
@@ -141,7 +141,7 @@ async function verifyModel(path2model) {
 }
 verifyModel('./static/models/houface512d');
 verifyModel('./static/models/houfer');
-verifyModel('./static/models/houdetection');
+verifyModel('./static/models/houdetection','ssd_mobilenetv1_model-weights_manifest.json');
 
 // (async () => {
 //     try {
