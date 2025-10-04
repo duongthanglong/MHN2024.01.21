@@ -85,6 +85,7 @@ function prewhiten(t) {
 }
 //*******************************************************************************//
 let houface_featuring = null;
+let houface_detection = null;
 let houfer_recognizing = null;
 const houfer_labels = {0:'Neg',1:'Neu',2:'Pos'};
 let MODELS_READY = false;
@@ -105,14 +106,16 @@ async function loadModels() {
         console.error('Error loading model/houfer_recognizing:',e);
     }
     try{
-        await faceapi.nets.ssdMobilenetv1.loadFromUri('./static/models/houdetection');
-        console.log('Loaded model/ssdMobilenetv1:',faceapi);
+        // await faceapi.nets.ssdMobilenetv1.loadFromUri('./static/models/houdetection');
+        houface_detection  = await tf.loadGraphModel('./static/models/houdetection/model.json');
+        console.log('Loaded model/ssdMobilenetv1:',houface_detection);
     } catch (e) {
         console.error('Error loading model/ssdMobilenetv1:',e);
     }
     MODELS_READY = true;
 }
 window.modelsReady = loadModels();
+
 async function verifyModel(path2model) {
     console.log(`verify model at ${path2model}`)
     const modelJson = await fetch(`${path2model}/model.json`);
@@ -149,10 +152,67 @@ verifyModel('./static/models/houdetection');
 //     } catch (error) {
 //         alert('Error loading models: ' + error.message);
 //     }
-// })();                           
+// })();
+function toInputTensor(domImageOrVideo) {
+  // SSD-Mobilenet expects 300x300 RGB float32, [0..1], with batch dim
+  return tf.tidy(() => {
+    const t = tf.browser.fromPixels(domImageOrVideo);
+    const resized = tf.image.resizeBilinear(t, [300, 300], true);
+    const normalized = resized.toFloat().div(255.0);
+    return normalized.expandDims(0); // [1,300,300,3]
+  });
+}
+async function detect(domImageOrVideo, scoreThresh = 0.5, iouThresh = 0.5, maxDetections = 20) {
+  const inputs = toInputTensor(domImageOrVideo);
+  const outputs = await houface_detection.executeAsync(inputs);
+  // If outputs are unnamed, they come as an array.
+  // Safer: map by names if available.
+  const outNames = model.outputNodes || [];
+  let boxes, scores, classes, numDetections;
+  if (Array.isArray(outputs)) {
+    // Likely in order: boxes, scores, classes, num
+    [boxes, scores, classes, numDetections] = outputs;
+  } else {
+    boxes = outputs['detection_boxes'];
+    scores = outputs['detection_scores'];
+    classes = outputs['detection_classes'];
+    numDetections = outputs['num_detections'];
+  }
+  // Convert to CPU and plain JS arrays
+  const [boxesArr, scoresArr] = await Promise.all([boxes.array(), scores.array()]);
+  const boxes2d = boxesArr[0];   // [N,4]
+  const scores1d = scoresArr[0]; // [N]
+  // NMS on CPU with tf.image.nonMaxSuppression
+  const selectedIdx = await tf.image.nonMaxSuppressionAsync(
+    tf.tensor2d(boxes2d),
+    tf.tensor1d(scores1d),
+    maxDetections,
+    iouThresh,
+    scoreThresh
+  );
+  const keep = await selectedIdx.array();
+  // Build final detections; convert normalized boxes to pixel coords
+  const w = domImageOrVideo.videoWidth || domImageOrVideo.width;
+  const h = domImageOrVideo.videoHeight || domImageOrVideo.height;
+  const detections = keep.map(i => {
+    const [ymin, xmin, ymax, xmax] = boxes2d[i];
+    return {
+      score: scores1d[i],
+      box: {
+        x: Math.round(xmin * w),
+        y: Math.round(ymin * h),
+        width: Math.round((xmax - xmin) * w),
+        height: Math.round((ymax - ymin) * h)
+      }
+    };
+  });
+  tf.dispose([input, boxes, scores, classes, numDetections, selectedIdx]);
+  return detections;
+}
 async function face_detect_descriptors(img_video, withFER) {
     if (!MODELS_READY) { await loadModels(); }
-    const detection = await faceapi.detectSingleFace(img_video);
+    // const detection = await faceapi.detectSingleFace(img_video);
+    const detection = await detect(img_video);
     if (detection) {
         const faceCanvas = cropSquareToCanvas(img_video, detection.box);
         let p1 = null; 
