@@ -113,6 +113,31 @@ async function loadModels() {
     MODELS_READY = true;
 }
 window.modelsReady = loadModels();
+async function verifyModel() {
+    const modelJson = await fetch('./static/models/houface512d/model.json');
+    const modelData = await modelJson.json();
+    
+    console.log('Model topology:', modelData);
+    
+    // Check each weight file
+    if (modelData.weightsManifest) {
+        for (const manifest of modelData.weightsManifest) {
+            for (const path of manifest.paths) {
+                const weightUrl = `./static/models/houface512d/${path}`;
+                const response = await fetch(weightUrl);
+                const blob = await response.blob();
+                console.log(`${path}: ${blob.size} bytes, type: ${blob.type}`);
+                
+                // Verify size is multiple of 4
+                if (blob.size % 4 !== 0) {
+                    console.error(`❌ ${path} has invalid size: ${blob.size}`);
+                }
+            }
+        }
+    }
+}
+verifyModel();
+
 // (async () => {
 //     try {
 //         await Promise.all([ faceapi.nets.ssdMobilenetv1.loadFromUri('/static/models/houdetection') ]);
